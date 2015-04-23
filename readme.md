@@ -19,7 +19,28 @@ new \UsabilityDynamics\WPLT\Bootstrap();
 
 ```
 
-#### Table Usage
+#### Table & Filter Usage
+
+Filter has the very similar fields with wp-meta-box plugin.
+You can find more information about filter fields here: http://metabox.io/docs/define-fields/
+
+List Table filter supports the following list of fields:
+* text
+* select
+* select_advanced
+* taxonomy
+* user
+* checkbox
+* checkbox_list
+* radio
+
+Also partially supports the following fields:
+* datetime
+* date
+* time
+
+##### Code Example
+
 ```php
 
 /**
