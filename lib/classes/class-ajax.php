@@ -99,18 +99,21 @@ namespace UsabilityDynamics\WPLT {
        */
       public function action_wplt_list_table( $args ) {
 
-        $args = wp_parse_args( $args, array(
-          'wplt_class' => '\UsabilityDynamics\SMSRentals\WP_List_Table',
-        ) );
+        $class = !empty( $args[ 'class' ] ) ? urldecode($args[ 'class' ]) : '\UsabilityDynamics\WPLT\WP_List_Table';
 
-        if( empty( $args[ 'wplt_class' ] ) || !is_string( $args[ 'wplt_class' ] ) || !class_exists( $args[ 'wplt_class' ] ) ) {
+        if( empty( $class ) || !is_string( $class ) || !class_exists( $class ) ) {
           throw new \Exception( __( 'Required WP List Table class does not exist' ) );
         }
 
-        $list_table = new $args['wplt_class']( $args );
-        $this->send_json( $list_table->ajax_response() );
+        $list_table = new $class( $args );
+        $response = $list_table->ajax_response();
+        if( !$response ) {
+          throw new \Exception( __( 'Error occurred on trying to get data.' ) );
+        }
+        return $response;
 
       }
+
     }
 
   }

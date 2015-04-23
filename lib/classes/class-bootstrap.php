@@ -18,8 +18,10 @@ namespace UsabilityDynamics\WPLT {
        */
       public function __construct(){
 
-        // Load AJAX Handler
-        new Ajax();
+        if ( defined('DOING_AJAX') && DOING_AJAX ) {
+          // Load AJAX Handler
+          new Ajax();
+        }
 
       }
 

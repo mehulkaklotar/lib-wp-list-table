@@ -16,7 +16,7 @@ namespace UsabilityDynamics\WPLT {
     require_once( ABSPATH . 'wp-admin/includes/class-wp-list-table.php' );
   }
 
-  if (!class_exists('UsabilityDynamics\SMSRentals\WP_List_Table')) {
+  if (!class_exists('UsabilityDynamics\WPLT\WP_List_Table')) {
 
     /** ************************ CREATE A PACKAGE CLASS ****************************
      *
@@ -45,12 +45,31 @@ namespace UsabilityDynamics\WPLT {
       public $_column_headers;
 
       /**
+       * Cached bulk actions
+       *
+       * @access private
+       */
+      private $_actions;
+
+      /**
+       * Notices
+       */
+      public $message;
+      public $warning;
+      public $error;
+
+      public $options = array();
+
+      /**
        * REQUIRED. Set up a constructor that references the parent constructor. We
        * use the parent reference to set some default configs.
+       * @param array $args
        */
-      public function __construct( $args ) {
+      public function __construct( $args = array() ) {
 
-        $screen = get_current_screen();
+        if( function_exists( 'get_current_screen' ) ) {
+          $screen = get_current_screen();
+        }
 
         //Set parent defaults
         parent::__construct( $args = wp_parse_args( $args, array(
@@ -63,17 +82,23 @@ namespace UsabilityDynamics\WPLT {
           // Per Page
           'per_page' => 20,
           // Post Type
-          'post_type' => $screen->id,
+          'post_type' => ( isset($screen) && is_object($screen) ? $screen->id : false ),
           'post_status' => 'any',
           // Pagination
           'paged' => 1,
           // Order By
           'orderby' => 'menu_order title',
           'order' => 'asc',
-          // Search Filter
-          'show_filter' => false,
-          // Additional params
-          'name' => ( $screen->id . '_' . rand( 101, 999 ) ),
+          // Specific Options
+          'options' => array(),
+          // HTML attributes
+          'name' => false,
+          // Extra parameters. Use it to provide any additional data.
+          'extra' => array(),
+          // WP_Query arguments
+          'query' => array(),
+          // AJAX Specific
+          'query2' => array(),
         ) ) );
 
         foreach( $args as $k => $v ) {
@@ -82,6 +107,18 @@ namespace UsabilityDynamics\WPLT {
             $args[ $k ] = $_REQUEST[ $k ];
           }
           switch( $k ) {
+            case 'options':
+              $this->options = wp_parse_args($args['options'], array(
+                'show_filter' => false,
+                'show_bulk_actions' => true,
+                'show_pagination' => true,
+              ));
+              break;
+            /* Filter Query ( Used by ajax requests ) */
+            case 'query2':
+              $this->query2 = $this->parse_query( $v );
+              break;
+            /* Per Page */
             case 'per_page':
               /** This filter is documented in wp-admin/includes/post.php */
               $this->per_page = apply_filters( 'edit_posts_per_page', $v, isset( $args[ 'post_type' ] ) ? $args[ 'post_type' ] : false );
@@ -92,7 +129,11 @@ namespace UsabilityDynamics\WPLT {
           }
         }
 
-        wp_enqueue_script( 'list-table-ajax', dirname( __DIR__ ) . 'static/scripts/wp-list-table.js', array('jquery') );
+        if( !$this->name ) {
+          $this->name = $this->post_type . '_' . rand( 1001, 9999 );
+        }
+
+        wp_enqueue_script( 'list-table-ajax', Utility::path( 'static/scripts/wp-list-table.js', 'url' ), array('jquery'), rand(10001,99999) );
 
       }
 
@@ -186,7 +227,7 @@ namespace UsabilityDynamics\WPLT {
        * @return array An associative array containing all the columns that should be sortable: 'slugs'=>array('data_values',bool)
        */
       public function get_sortable_columns() {
-        return $sortable_columns = array(
+        return array(
           'title'	 	=> array( 'post_title', false ),	//true means it's already sorted
         );
       }
@@ -217,6 +258,20 @@ namespace UsabilityDynamics\WPLT {
        * @see $this->prepare_items()
        */
       public function process_bulk_action() {}
+
+      /**
+       * Get the current action selected from the bulk actions dropdown.
+       *
+       * @access public
+       * @return string|bool The action name or False if no action was selected
+       */
+      public function current_action() {
+
+        if ( isset( $_REQUEST['doaction'] ) && -1 != $_REQUEST['doaction'] )
+          return $_REQUEST['doaction'];
+
+        return false;
+      }
 
       /**
        * REQUIRED! This is where you prepare your data for display. This method will
@@ -254,15 +309,9 @@ namespace UsabilityDynamics\WPLT {
         $this->_column_headers = array($columns, $hidden, $sortable);
 
         /**
-         * Optional. You can handle your bulk actions however you see fit. In this
-         * case, we'll handle them within our package just to keep things clean.
-         */
-        $this->process_bulk_action();
-
-        /**
          * Prepare Query
          */
-        $query = $this->query();
+        $query = $this->wp_query();
 
         /**
          * REQUIRED for pagination. Let's check how many items are in our data array.
@@ -300,17 +349,325 @@ namespace UsabilityDynamics\WPLT {
       /**
        *
        */
-      protected function query() {
+      protected function wp_query() {
 
-        return new \WP_Query( array(
+        $args = array_merge( array(
           'post_type' => $this->post_type,
           'post_status' => $this->post_status,
           'paged' => $this->paged,
           'posts_per_page' => $this->per_page,
           'orderby' => $this->orderby,
           'order' => $this->order,
-        ) );
+        ), array_merge_recursive( $this->query, $this->query2 ) );
 
+        return new \WP_Query( $args );
+      }
+
+      /**
+       *
+       */
+      protected function parse_query( $query ){
+        $_query = array();
+
+        if( !empty( $query ) ) {
+
+          /* Merge queries with the same names */
+          $_prepared_query = array();
+          foreach( $query as $q ) {
+            if( isset( $_prepared_query[ $q['name'] ] ) ) {
+              if( !is_array($_prepared_query[ $q['name'] ]['value'] ) ) {
+                $_prepared_query[ $q['name'] ]['value'] = array($_prepared_query[ $q['name'] ]['value']);
+              }
+              if( !is_array($q['value'] ) ) {
+                $q['value'] = array($q['value']);
+              }
+              $q['value'] = array_unique( array_merge( $_prepared_query[ $q['name'] ]['value'], $q['value'] ) );
+              $_prepared_query[ $q['name'] ] = array_merge( $_prepared_query[ $q['name'] ], $q );
+            } else {
+              $_prepared_query[ $q['name'] ] = $q;
+            }
+          }
+          $query = $_prepared_query;
+
+          foreach( $query as $q ) {
+            if( empty($q['value']) ) {
+              continue;
+            }
+            // It should not happen, but we check it in just case
+            if(!isset($q['map']) || !isset($q['name']) || !isset($q['value'])){
+              continue;
+            }
+            $map = json_decode(urldecode($q['map']), true);
+            // One more check. It should not happen too, but we check it in just case
+            if( !is_array($map) || !isset($map['class']) || !isset($map['type']) || !isset($map['compare']) ) {
+              continue;
+            }
+
+            switch( $map['class'] ) {
+              case 'post':
+
+                $_query[ $q['name'] ] = $q['value'];
+
+                break;
+
+              case 'meta':
+
+                if( !isset( $_query[ 'meta_query' ] ) ) {
+                  $_query[ 'meta_query' ] = array();
+                }
+
+                $args = array(
+                  'key' => $q['name'],
+                  'value' => $q['value'],
+                  'compare' => $map['compare'],
+                );
+
+                array_push( $_query[ 'meta_query' ], $args );
+
+                break;
+
+              case 'taxonomy':
+
+                if( !isset( $_query[ 'tax_query' ] ) ) {
+                  $_query[ 'tax_query' ] = array();
+                }
+
+                if( $map[ 'type' ] === 'string' ) {
+                  $map[ 'type' ] = 'term_id';
+                }
+
+                if( $map[ 'compare' ] === '=' ) {
+                  $map[ 'compare' ] = false;
+                }
+
+                if( !is_array( $q['value'] ) ) {
+                  $q['value'] = array( $q['value'] );
+                }
+
+                /**
+                 * Determine, which criteria we should use for search: 'AND' or 'OR'
+                 */
+                if( in_array( $map[ 'compare' ], array( 'NOT IN', 'IN' ) ) ) {
+
+                  $args = array_filter( array(
+                    'taxonomy' => $q['name'],
+                    'field' => $map['type'],
+                    'terms' => array($q['value']),
+                    'operator' => $map[ 'compare' ] == 'NOT IN' ? $map[ 'compare' ] : false,
+                  ) );
+
+                  array_push( $_query[ 'tax_query' ], $args );
+
+                } else {
+                  /**
+                   * We add every value separately to search using criteria 'AND' ( not 'OR' ).
+                   */
+                  $args = array( 'relation' => 'AND' );
+                  foreach( $q['value'] as $value ) {
+                    $args[] = array(
+                      'taxonomy' => $q['name'],
+                      'field' => $map['type'],
+                      'terms' => array($value),
+                    );
+                  }
+
+                  array_push( $_query[ 'tax_query' ], $args );
+                }
+
+                break;
+            }
+          }
+
+        }
+
+        return $_query;
+      }
+
+      /**
+       * Generate the table navigation above or below the table
+       *
+       * @access protected
+       * @param string $which
+       */
+      protected function display_tablenav( $which ) {
+        ?>
+        <div class="tablenav <?php echo esc_attr( $which ); ?>">
+
+          <?php if( isset( $this->options['show_bulk_actions'] ) && $this->options['show_bulk_actions']  ) { ?>
+
+          <div class="alignleft actions bulkactions">
+            <?php $this->bulk_actions( $which ); ?>
+          </div>
+
+          <?php } ?>
+
+          <?php if( isset( $this->options['show_pagination'] ) && $this->options['show_pagination'] ) {  ?>
+          <?php $this->extra_tablenav( $which ); ?>
+          <?php $this->pagination( $which ); ?>
+          <?php  }  ?>
+
+          <br class="clear" />
+        </div>
+        <?php
+      }
+
+      /**
+       * Display the bulk actions dropdown.
+       *
+       * @access protected
+       * @param string $which The location of the bulk actions: 'top' or 'bottom'.
+       *                      This is designated as optional for backwards-compatibility.
+       */
+      protected function bulk_actions( $which = '' ) {
+        if ( is_null( $this->_actions ) ) {
+          $no_new_actions = $this->_actions = $this->get_bulk_actions();
+          /**
+           * Filter the list table Bulk Actions drop-down.
+           *
+           * The dynamic portion of the hook name, `$this->screen->id`, refers
+           * to the ID of the current screen, usually a string.
+           *
+           * This filter can currently only be used to remove bulk actions.
+           *
+           * @since 3.5.0
+           *
+           * @param array $actions An array of the available bulk actions.
+           */
+          $this->_actions = apply_filters( "bulk_actions-{$this->screen->id}", $this->_actions );
+          $this->_actions = array_intersect_assoc( $this->_actions, $no_new_actions );
+          $two = '';
+        } else {
+          $two = '2';
+        }
+
+        if ( empty( $this->_actions ) )
+          return;
+
+        echo "<label for='bulk-action-selector-" . esc_attr( $which ) . "' class='screen-reader-text'>" . __( 'Select bulk action' ) . "</label>";
+        echo "<select name='doaction$two' id='bulk-action-selector-" . esc_attr( $which ) . "'>\n";
+        echo "<option value='-1' selected='selected'>" . __( 'Bulk Actions' ) . "</option>\n";
+
+        foreach ( $this->_actions as $name => $title ) {
+          $class = 'edit' == $name ? ' class="hide-if-no-js"' : '';
+
+          echo "\t<option value='$name'$class>$title</option>\n";
+        }
+
+        echo "</select>\n";
+
+        submit_button( __( 'Apply' ), 'action', false, false, array( 'id' => "doaction$two" ) );
+        echo "\n";
+      }
+
+      /**
+       * Address Column
+       *
+       * @return string
+       */
+      public function column_title( $post ) {
+        $data = "";
+
+        $lock_holder = wp_check_post_lock( $post->ID );
+        if ( $lock_holder ) {
+          $lock_holder = get_userdata( $lock_holder );
+        }
+
+        $post_type_object = get_post_type_object( $post->post_type );
+        $edit_link = get_edit_post_link( $post->ID );
+        $can_edit_post = current_user_can( 'edit_post', $post->ID );
+        $title = apply_filters( 'wplt_column_title_label', _draft_or_post_title( $post ), $post );
+
+        if ( $format = get_post_format( $post->ID ) ) {
+          $label = get_post_format_string( $format );
+          $data .= '<a href="' . esc_url( add_query_arg( array( 'post_format' => $format, 'post_type' => $post->post_type ), 'edit.php' ) ) . '" class="post-state-format post-format-icon post-format-' . $format . '" title="' . $label . '">' . $label . ":</a> ";
+        }
+
+        if ( $can_edit_post && $post->post_status != 'trash' ) {
+          $data .= '<a class="row-title" href="' . $edit_link . '" title="' . esc_attr( sprintf( __( 'Edit &#8220;%s&#8221;' ), $title ) ) . '">' . $title . '</a>';
+        } else {
+          $data .= $title;
+        }
+
+        ob_start();
+        _post_states( $post );
+        $data .= ob_get_clean();
+
+        if ( isset( $parent_name ) )
+          $data .= ' | ' . $post_type_object->labels->parent_item_colon . ' ' . esc_html( $parent_name );
+
+        $data .= "</strong>\n";
+
+        if ( $can_edit_post && $post->post_status != 'trash' ) {
+          if ( $lock_holder ) {
+            $locked_avatar = get_avatar( $lock_holder->ID, 18 );
+            $locked_text = esc_html( sprintf( __( '%s is currently editing' ), $lock_holder->display_name ) );
+          } else {
+            $locked_avatar = $locked_text = '';
+          }
+
+          $data .= '<div class="locked-info"><span class="locked-avatar">' . $locked_avatar . '</span> <span class="locked-text">' . $locked_text . "</span></div>\n";
+        }
+
+        $actions = array();
+        if ( $can_edit_post && 'trash' != $post->post_status ) {
+          $actions['edit'] = '<a href="' . get_edit_post_link( $post->ID, true ) . '" title="' . esc_attr__( 'Edit this item' ) . '">' . __( 'Edit' ) . '</a>';
+        }
+        if ( current_user_can( 'delete_post', $post->ID ) ) {
+          if ( 'trash' == $post->post_status )
+            $actions['untrash'] = "<a title='" . esc_attr__( 'Restore this item from the Trash' ) . "' href='" . wp_nonce_url( admin_url( sprintf( $post_type_object->_edit_link . '&amp;action=untrash', $post->ID ) ), 'untrash-post_' . $post->ID ) . "'>" . __( 'Restore' ) . "</a>";
+          elseif ( EMPTY_TRASH_DAYS )
+            $actions['trash'] = "<a class='submitdelete' title='" . esc_attr__( 'Move this item to the Trash' ) . "' href='" . get_delete_post_link( $post->ID ) . "'>" . __( 'Trash' ) . "</a>";
+          if ( 'trash' == $post->post_status || !EMPTY_TRASH_DAYS )
+            $actions['delete'] = "<a class='submitdelete' title='" . esc_attr__( 'Delete this item permanently' ) . "' href='" . get_delete_post_link( $post->ID, '', true ) . "'>" . __( 'Delete Permanently' ) . "</a>";
+        }
+        if ( $post_type_object->public ) {
+          if ( in_array( $post->post_status, array( 'pending', 'draft', 'future' ) ) ) {
+            if ( $can_edit_post ) {
+              $preview_link = set_url_scheme( get_permalink( $post->ID ) );
+              /** This filter is documented in wp-admin/includes/meta-boxes.php */
+              $preview_link = apply_filters( 'preview_post_link', add_query_arg( 'preview', 'true', $preview_link ), $post );
+              $actions['view'] = '<a href="' . esc_url( $preview_link ) . '" title="' . esc_attr( sprintf( __( 'Preview &#8220;%s&#8221;' ), $title ) ) . '" rel="permalink">' . __( 'Preview' ) . '</a>';
+            }
+          } elseif ( 'trash' != $post->post_status ) {
+            $actions['view'] = '<a href="' . get_permalink( $post->ID ) . '" title="' . esc_attr( sprintf( __( 'View &#8220;%s&#8221;' ), $title ) ) . '" rel="permalink">' . __( 'View' ) . '</a>';
+          }
+        }
+
+        if ( is_post_type_hierarchical( $post->post_type ) ) {
+
+          /**
+           * Filter the array of row action links on the Pages list table.
+           *
+           * The filter is evaluated only for hierarchical post types.
+           *
+           * @since 2.8.0
+           *
+           * @param array   $actions An array of row action links. Defaults are
+           *                         'Edit', 'Quick Edit', 'Restore, 'Trash',
+           *                         'Delete Permanently', 'Preview', and 'View'.
+           * @param WP_Post $post    The post object.
+           */
+          $actions = apply_filters( 'page_row_actions', $actions, $post );
+        } else {
+
+          /**
+           * Filter the array of row action links on the Posts list table.
+           *
+           * The filter is evaluated only for non-hierarchical post types.
+           *
+           * @since 2.8.0
+           *
+           * @param array   $actions An array of row action links. Defaults are
+           *                         'Edit', 'Quick Edit', 'Restore, 'Trash',
+           *                         'Delete Permanently', 'Preview', and 'View'.
+           * @param WP_Post $post    The post object.
+           */
+          $actions = apply_filters( 'post_row_actions', $actions, $post );
+        }
+
+        $data .= $this->row_actions( $actions );
+
+        return $data;
       }
 
       /**
@@ -319,31 +676,77 @@ namespace UsabilityDynamics\WPLT {
        *
        * @since 3.1.0
        * @access public
+       * @param array $args
        */
-      function display() {
+      public function display( $args = array() ) {
 
-        echo "<form name=\"{$this->name}\" class=\"wplt_container\" method=\"get\">";
+        echo "<div id=\"{$this->name}\" class=\"wplt_container\">";
 
-        wp_nonce_field( 'ajax-custom-list-nonce', '_ajax_custom_list_nonce' );
-
-        echo '<input type="hidden" id="order" name="wplt_class" value="' . get_class( $this ) . '" />';
-        echo '<input type="hidden" id="order" name="order" value="' . $this->_pagination_args['order'] . '" />';
-        echo '<input type="hidden" id="orderby" name="orderby" value="' . $this->_pagination_args['orderby'] . '" />';
-
-        if( $this->show_filter ) {
+        if( $this->options['show_filter'] ) {
           $this->filter();
         }
 
-        parent::display();
+        $singular = $this->_args['singular'];
 
-        echo "</form>";
+        $this->display_tablenav( 'top' );
+
+        ?>
+        <table class="wp-list-table <?php echo implode( ' ', $this->get_table_classes() ); ?>">
+
+          <thead>
+          <tr><?php $this->print_column_headers(); ?></tr>
+          </thead>
+
+          <tfoot>
+            <tr><?php $this->print_column_headers( false ); ?></tr>
+          </tfoot>
+
+          <tbody id="the-list"<?php if ( $singular ) { echo " data-wp-lists='list:$singular'"; } ?>>
+            <?php $this->display_rows_or_placeholder(); ?>
+          </tbody>
+
+        </table>
+
+        <?php $this->display_tablenav( 'bottom' ); ?>
+
+        </div>
+
+        <?php echo "<script type=\"text/javascript\">
+          jQuery( document ).ready( function(){
+            if( typeof jQuery.fn.wp_list_table !== 'undefined' ) {
+              if(typeof window.wplt == 'undefined'){
+                window.wplt = {};
+              }
+              window.wplt.{$this->name} = jQuery( '#{$this->name}' ).wp_list_table({
+                '_wpnonce': '" . wp_create_nonce( '_wplt_list_nonce' ) . "',
+                'order': '{$this->order}',
+                'orderby': '{$this->orderby}',
+                'singular': '{$this->singular}',
+                'plural': '{$this->plural}',
+                'class': '" . urlencode( get_class( $this ) ) . "',
+                'per_page': '{$this->per_page}',
+                'post_type': '{$this->post_type}',
+                'post_status': '{$this->post_status}',
+                'extra': " . ( is_array( $this->extra ) ? json_encode( $this->extra ) : '{}' ) . ",
+                'query': " . ( is_array( $this->query ) ? json_encode( $this->query ) : '{}' ) . "
+              });
+            }
+          } );
+        </script>"; ?>
+
+      <?php
+
       }
 
       /**
        * Renders Search Filter
        */
       public function filter() {
-        // @TODO
+        $f = $this->filter;
+        if( $f && !empty( $f['fields'] ) ) {
+          $filter = new Filter( array_merge( $f, array( 'name' => $this->name ) ) );
+          $filter->display();
+        }
       }
 
       /**
@@ -352,9 +755,15 @@ namespace UsabilityDynamics\WPLT {
        * @since 3.1.0
        * @access public
        */
-      function ajax_response() {
+      public function ajax_response() {
 
-        check_ajax_referer( 'ajax-custom-list-nonce', '_ajax_custom_list_nonce' );
+        if( !isset($_REQUEST[ '_wpnonce' ]) || !wp_verify_nonce( $_REQUEST[ '_wpnonce' ], '_wplt_list_nonce' ) ) {
+          return false;
+        }
+
+        $response = array();
+
+        $this->process_bulk_action();
 
         $this->prepare_items();
 
@@ -366,24 +775,39 @@ namespace UsabilityDynamics\WPLT {
           $this->display_rows();
         else
           $this->display_rows_or_placeholder();
-        $rows = ob_get_clean();
+        $response['rows'] = ob_get_clean();
 
         ob_start();
         $this->print_column_headers();
-        $headers = ob_get_clean();
+        $response['column_headers'] = ob_get_clean();
+
+        ob_start();
+        $this->bulk_actions('top');
+        $response['bulk_actions']['top'] = ob_get_clean();
+
+        ob_start();
+        $this->bulk_actions('bottom');
+        $response['bulk_actions']['bottom'] = ob_get_clean();
 
         ob_start();
         $this->pagination('top');
-        $pagination_top = ob_get_clean();
+        $response['pagination']['top'] = ob_get_clean();
 
         ob_start();
         $this->pagination('bottom');
-        $pagination_bottom = ob_get_clean();
+        $response['pagination']['bottom'] = ob_get_clean();
 
-        $response = array( 'rows' => $rows );
-        $response['pagination']['top'] = $pagination_top;
-        $response['pagination']['bottom'] = $pagination_bottom;
-        $response['column_headers'] = $headers;
+        /* Notices */
+        $response['notice'] = array();
+        if( !empty( $this->message ) ) {
+          $response['notice']['message'] = $this->message;
+        }
+        if( !empty( $this->warning ) ) {
+          $response['notice']['warning'] = $this->warning;
+        }
+        if( !empty( $this->error ) ) {
+          $response['notice']['error'] = $this->error;
+        }
 
         if ( isset( $total_items ) )
           $response['total_items_i18n'] = sprintf( _n( '1 item', '%s items', $total_items ), number_format_i18n( $total_items ) );
