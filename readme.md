@@ -4,8 +4,6 @@ lib-wp-list-table
 ## Description
 Advanced AJAX WP_List_Table library for Wordpress
 
-##Examples
-
 #### Loader
 ```php
 
