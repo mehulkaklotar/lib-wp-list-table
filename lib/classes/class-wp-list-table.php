@@ -81,8 +81,9 @@ namespace UsabilityDynamics\WPLT {
           'ajax'		=> true,
           // Per Page
           'per_page' => 20,
-          // Post Type
+          // Post Type and Screen
           'post_type' => ( isset($screen) && is_object($screen) ? $screen->id : false ),
+          'screen' => ( isset($screen) && is_object($screen) ? $screen->id : false ),
           'post_status' => 'any',
           // Pagination
           'paged' => 1,
@@ -123,6 +124,10 @@ namespace UsabilityDynamics\WPLT {
               /** This filter is documented in wp-admin/includes/post.php */
               $this->per_page = apply_filters( 'edit_posts_per_page', $v, isset( $args[ 'post_type' ] ) ? $args[ 'post_type' ] : false );
               break;
+            /* Set order params in $_GET (required to have working ordering) */
+            case 'order':
+            case 'orderby':
+              $_GET[$k] = $v;
             default:
               $this->{$k} = $v;
               break;
@@ -228,7 +233,7 @@ namespace UsabilityDynamics\WPLT {
        */
       public function get_sortable_columns() {
         return array(
-          'title'	 	=> array( 'post_title', false ),	//true means it's already sorted
+          'title'	 	=> array( 'title', false ),	//true means it's already sorted
         );
       }
 
@@ -297,7 +302,7 @@ namespace UsabilityDynamics\WPLT {
          * used to build the value for our _column_headers property.
          */
         $columns = $this->get_columns();
-        $hidden = array();
+        $hidden = !empty( $this->screen ) ? get_hidden_columns( $this->screen ) : array();
         $sortable = $this->get_sortable_columns();
 
         /**
@@ -347,9 +352,12 @@ namespace UsabilityDynamics\WPLT {
       }
 
       /**
+       * The method must not be overwritten.
+       * Use filter_wp_query() method to add custom arguments for WP_Query
        *
+       * @return object WP_Query
        */
-      protected function wp_query() {
+      private function wp_query() {
 
         $args = array_merge( array(
           'post_type' => $this->post_type,
@@ -357,14 +365,72 @@ namespace UsabilityDynamics\WPLT {
           'paged' => $this->paged,
           'posts_per_page' => $this->per_page,
           'orderby' => $this->orderby,
-          'order' => $this->order,
+          'order' => strtoupper( $this->order ),
         ), array_merge_recursive( $this->query, $this->query2 ) );
+
+        /* Prepare Order arguments */
+
+        $predefined_orderby = array(
+          'none',
+          'ID',
+          'author',
+          'title',
+          'name',
+          'type',
+          'date',
+          'modified',
+          'parent',
+          'rand',
+          'comment_count',
+          'menu_order',
+          'post__in',
+          'meta_value',
+        );
+
+        $orderby = explode( ' ', trim( $args['orderby'] ) );
+        $args[ 'orderby' ] = array();
+        foreach( $orderby as $ob ) {
+          $ob = trim($ob);
+          if( empty($ob) ) {
+            continue;
+          }
+          if( !in_array( $ob, $predefined_orderby ) ) {
+            if( !empty( $args[ 'meta_key' ] ) ) {
+              if( $args[ 'meta_key' ] !== $ob ) {
+                continue;
+              }
+            } else {
+              $args[ 'meta_key' ] = $ob;
+            }
+            /**
+             * Use hook 'wplt:orderby:is_numeric' in child class
+             * to set specific meta key as numeric ( e.g. price ).
+             */
+            $is_numeric = apply_filters( 'wplt:orderby:is_numeric', false, $ob );
+            $key = $is_numeric ? 'meta_value_num' : 'meta_value';
+            $args[ 'orderby' ][ $key ] = $args[ 'order' ];
+            /**
+             * Use hook 'wplt:orderby:meta_type' in child class
+             * to set specific meta type:
+             * 'NUMERIC', 'BINARY', 'CHAR', 'DATE', 'DATETIME', 'DECIMAL', 'SIGNED', 'TIME', 'UNSIGNED'
+             */
+            $meta_type = apply_filters( 'wplt:orderby:meta_type', false, $ob );
+            if( !empty( $meta_type ) ) {
+              $args[ 'meta_type' ] = $meta_type;
+            }
+          } else {
+            $args[ 'orderby' ][ $ob ] = $args[ 'order' ];
+          }
+        }
+
+        /* Use method below to pass extra arguments or modify existing ones. */
+        $args = $this->filter_wp_query( $args );
 
         return new \WP_Query( $args );
       }
 
       /**
-       *
+       * Parses Filter Query (query2)
        */
       protected function parse_query( $query ){
         $_query = array();
@@ -414,6 +480,10 @@ namespace UsabilityDynamics\WPLT {
 
                 if( !isset( $_query[ 'meta_query' ] ) ) {
                   $_query[ 'meta_query' ] = array();
+                }
+
+                if( is_array( $q['value'] ) && !in_array( $map['compare'], array( 'NOT IN', 'IN' ) ) ) {
+                  $map['compare'] = 'IN';
                 }
 
                 $args = array(
@@ -481,6 +551,17 @@ namespace UsabilityDynamics\WPLT {
         }
 
         return $_query;
+      }
+
+      /**
+       * Redeclare method in child class to
+       * pass extra arguments or modify existing ones for WP_Query
+       *
+       * @param array $args
+       * @return array
+       */
+      public function filter_wp_query( $args ) {
+        return $args;
       }
 
       /**
@@ -726,7 +807,8 @@ namespace UsabilityDynamics\WPLT {
                 'class': '" . urlencode( get_class( $this ) ) . "',
                 'per_page': '{$this->per_page}',
                 'post_type': '{$this->post_type}',
-                'post_status': '{$this->post_status}',
+                'screen': '{$this->screen}',
+                'post_status': " . ( is_array( $this->post_status ) ? json_encode( $this->post_status ) : "'" . $this->post_status . "'" ) .  ",
                 'extra': " . ( is_array( $this->extra ) ? json_encode( $this->extra ) : '{}' ) . ",
                 'query': " . ( is_array( $this->query ) ? json_encode( $this->query ) : '{}' ) . "
               });

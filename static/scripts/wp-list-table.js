@@ -20,6 +20,7 @@
 			'class': '',
 			'per_page': '20',
 			'post_type': false,
+			'screen': false,
 			'post_status': 'any',
 			'_wpnonce': false,
 			'extra': {},
@@ -279,9 +280,15 @@
 							return;
 						}
 
+						var value = $(e).val();
+						// HACK for checkbox. Value can be stored as '1', 'true', 'on' in DB.
+						if( $(e).attr('type') == 'checkbox' ) {
+							value = ['1','true','on'];
+						}
+
 						filter.push({
 							'name': $(e).attr('name').replace(/wplt_filter\.([^\[]*)(\[.*\])?/,"$1"),
-							'value': $(e).val(),
+							'value': value,
 							'map': map
 						});
 					});
@@ -294,6 +301,7 @@
 					'class': vars.class,
 					'per_page': vars.per_page,
 					'post_type': vars.post_type,
+					'screen': vars.screen,
 					'post_status': vars.post_status,
 					'_wpnonce': vars._wpnonce,
 					'extra': vars.extra,
