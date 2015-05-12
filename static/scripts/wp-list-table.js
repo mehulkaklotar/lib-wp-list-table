@@ -47,6 +47,12 @@
 
 			called: false,
 
+			paged: '1',
+
+			order: vars.order,
+
+			orderby: vars.orderby,
+
 			/**
 			 * Register our triggers
 			 *
@@ -73,14 +79,13 @@
 				$('.tablenav-pages a, .manage-column.sortable a, .manage-column.sorted a', el).on('click', function(e) {
 					// We don't want to actually follow these links
 					e.preventDefault();
+
 					// Simple way: use the URL to extract our needed variables
 					var query = this.search.substring( 1 );
-					var data = {
-						paged: list.__query( query, 'paged' ) || '1',
-						order: list.__query( query, 'order' ) || vars.order,
-						orderby: list.__query( query, 'orderby' ) || vars.orderby
-					};
-					list.update( data, 'sort' );
+					list.paged = list.__query( query, 'paged' ) || '1';
+					list.order = list.__query( query, 'order' ) || list.order;
+					list.orderby = list.__query( query, 'orderby' ) || list.orderby;
+					list.update( 'sort' );
 				});
 
 				/**
@@ -94,12 +99,9 @@
 					if ( 13 == e.which )
 						e.preventDefault();
 
-					// This time we fetch the variables in inputs
-					var data = {
-						paged: parseInt( $('input[name=paged]',el).val() ) || '1',
-						order: $('input[name=order]',el).val() || vars.order,
-						orderby: $('input[name=orderby]',el).val() || vars.orderby
-					};
+					list.paged = parseInt( $('input[name=paged]',el).val() ) || '1';
+					list.order = $('input[name=order]',el).val() || list.order;
+					list.orderby = $('input[name=orderby]',el).val() || list.orderby;
 
 					// Now the timer comes to use: we wait half a second after
 					// the user stopped typing to actually send the call. If
@@ -108,7 +110,7 @@
 					// value
 					window.clearTimeout( list.timer );
 					list.timer = window.setTimeout(function() {
-						list.update( data, 'pagination' );
+						list.update( 'pagination' );
 					}, list.delay);
 				});
 
@@ -136,10 +138,12 @@
 						return;
 					}
 
-					list.update( {
+					list.paged = '1';
+
+					list.update( 'doaction', {
 						'doaction': action,
 						'post_ids': ids
-					}, 'doaction' );
+					} );
 
 				});
 
@@ -205,6 +209,7 @@
 						return;
 					}
 				});
+
 				list.filter = filter;
 				if( !filter ) {
 					return;
@@ -249,11 +254,12 @@
 			 * Must be run on any filter change.
 			 */
 			change_filter: function() {
+				list.paged = '1';
 				// Now the timer comes to use: we wait 0.7 sec after
 				// the user stopped filtering data to actually send the call.
 				window.clearTimeout( list.timer );
 				list.timer = window.setTimeout(function() {
-					list.update( {}, 'filter' );
+					list.update( 'filter' );
 				}, list.delay);
 			},
 
@@ -261,7 +267,6 @@
 			 *
 			 */
 			data: function( data ) {
-
 				// Prepare our filter data to send in request!
 				var filter = [];
 				if( typeof list.filter == 'object' && list.filter.length > 0 ){
@@ -294,7 +299,10 @@
 					});
 				}
 
-				return $.extend( {
+			 	data = $.extend( {
+					'order': list.order,
+					'orderby': list.orderby,
+					'paged': list.paged,
 					'action': 'wplt_list_table',
 					'singular': vars.singular,
 					'plural': vars.plural,
@@ -309,6 +317,7 @@
 					'query2': filter
 				}, data );
 
+				return data;
 			},
 
 			/**
@@ -317,7 +326,7 @@
 			 *
 			 * @param    object    data The data to pass through AJAX
 			 */
-			update: function( data, type ) {
+			update: function( type, data ) {
 				$.ajax({
 					// /wp-admin/admin-ajax.php
 					url: ajaxurl,
@@ -330,6 +339,17 @@
 						if( typeof r !== 'object' ) {
 							alert( 'Invalid response from server' );
 							return;
+						}
+
+						// Maybe show notice
+						if( typeof r.data !== 'undefined' && typeof r.data.notice !== 'undefined' ) {
+							if( typeof r.data.notice.error !== 'undefined' ) {
+								list.notice( r.data.notice.error, 'error' );
+							} else if( typeof r.data.notice.warning !== 'undefined' ) {
+								list.notice( r.data.notice.warning, 'error' );
+							} else if( typeof r.data.notice.message !== 'undefined' ) {
+								list.notice( r.data.notice.message, 'updated' );
+							}
 						}
 
 						if( !r.success ) {
@@ -358,15 +378,6 @@
 						}
 						if ( typeof r.data.pagination.bottom !== 'undefined' ) {
 							$('.tablenav.bottom .tablenav-pages', el).html( $(r.data.pagination.bottom).html() );
-						}
-
-						// Maybe show notice
-						if( typeof r.data.notice.error !== 'undefined' ) {
-							list.notice( r.data.notice.error, 'error' );
-						} else if( typeof r.data.notice.warning !== 'undefined' ) {
-							list.notice( r.data.notice.warning, 'error' );
-						} else if( typeof r.data.notice.message !== 'undefined' ) {
-							list.notice( r.data.notice.message, 'updated' );
 						}
 
 						// Init back our event handlers
@@ -406,7 +417,6 @@
 			 * @return   string|boolean The variable value if available, false else.
 			 */
 			__query: function( query, variable ) {
-
 				var vars = query.split("&");
 				for ( var i = 0; i <vars.length; i++ ) {
 					var pair = vars[ i ].split("=");

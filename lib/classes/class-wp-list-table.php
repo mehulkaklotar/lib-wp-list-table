@@ -879,6 +879,16 @@ namespace UsabilityDynamics\WPLT {
         $this->pagination('bottom');
         $response['pagination']['bottom'] = ob_get_clean();
 
+        if ( isset( $total_items ) )
+          $response['total_items_i18n'] = sprintf( _n( '1 item', '%s items', $total_items ), number_format_i18n( $total_items ) );
+
+        if ( isset( $total_pages ) ) {
+          $response['total_pages'] = $total_pages;
+          $response['total_pages_i18n'] = number_format_i18n( $total_pages );
+        }
+
+        $response = apply_filters( 'wplt::ajax_response', $response );
+
         /* Notices */
         $response['notice'] = array();
         if( !empty( $this->message ) ) {
@@ -889,14 +899,6 @@ namespace UsabilityDynamics\WPLT {
         }
         if( !empty( $this->error ) ) {
           $response['notice']['error'] = $this->error;
-        }
-
-        if ( isset( $total_items ) )
-          $response['total_items_i18n'] = sprintf( _n( '1 item', '%s items', $total_items ), number_format_i18n( $total_items ) );
-
-        if ( isset( $total_pages ) ) {
-          $response['total_pages'] = $total_pages;
-          $response['total_pages_i18n'] = number_format_i18n( $total_pages );
         }
 
         return $response;
