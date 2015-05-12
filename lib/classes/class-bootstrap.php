@@ -19,8 +19,11 @@ namespace UsabilityDynamics\WPLT {
       public function __construct(){
 
         if ( defined('DOING_AJAX') && DOING_AJAX ) {
-          // Load AJAX Handler
-          new Ajax();
+          // Load AJAX Handler once!
+          if( !defined( 'WP_LIST_TABLE_AJAX' ) ) {
+            define( 'WP_LIST_TABLE_AJAX', true );
+            new Ajax();
+          }
         }
 
       }
