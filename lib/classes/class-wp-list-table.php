@@ -614,7 +614,7 @@ namespace UsabilityDynamics\WPLT {
            *
            * @param array $actions An array of the available bulk actions.
            */
-          $this->_actions = apply_filters( "bulk_actions-{$this->screen->id}", $this->_actions );
+          $this->_actions = apply_filters( "bulk_actions-{$this->screen}", $this->_actions );
           $this->_actions = array_intersect_assoc( $this->_actions, $no_new_actions );
           $two = '';
         } else {
