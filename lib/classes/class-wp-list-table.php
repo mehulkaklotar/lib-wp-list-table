@@ -374,7 +374,7 @@ namespace UsabilityDynamics\WPLT {
 
           $primary_column = false;
 
-          if( is_callable( array( $this, 'get_primary_column_name' ) ) ) {
+          if( method_exists( $this, 'get_primary_column_name' ) ) {
 
             $primary_column = $this->get_primary_column_name();
 
